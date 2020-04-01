@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <algorithm>
 #include <crmw/crmw.h>
 #include <math/extrinsics.h>
@@ -13,12 +14,10 @@
 #include <navsat_conversions.h>
 #define ACCEPT_USE_OF_DEPRECATED_PROJ_API_H
 #include <proj_api.h>
+#include <set>
 
-DEFINE_int32(alpha, 3, "param for Ostu loss");
+DEFINE_double(alpha, 3, "param for Ostu loss");
 DEFINE_string(frame_id, "velodyne", "lidar topic name");
-DEFINE_int32(scanline_min, 61, "the first scan line index");
-DEFINE_int32(scanline_max, 60, "the last scan line index");
-DEFINE_int32(minthred, 30, "the minimum threshold");
 //for realtime pointmap saving
 DEFINE_string(out, std::string("lidarlane.pointmap"), "file path of output file, default is same as pcd path");
 DEFINE_bool(embeded_offset, true, "wether the map offset embeded in the last two points");
@@ -29,6 +28,57 @@ DEFINE_int32(zone, 0, "utm zone for proj, 0 for autonomic calc");
 DEFINE_int32(max_intensity, 40, "max intensity of pointcloud, with higher intensity for curb");
 DEFINE_int32(min_intensity, 3, "min intensity of pointcloud, with lower intensity for ignore");
 
+template<typename T>
+class LowerBoundVector
+{
+private:
+	std::vector<T> history_, pool_;
+	int median_;
+
+public:
+	int keep_odd(int n)
+	{
+		return n % 2 == 0 ? n + 1 : n;	
+	}
+
+	LowerBoundVector(int window_size):
+									history_(keep_odd(window_size), T()),
+									pool_(history_),
+									median_(window_size / 2 + 1)
+	{
+		assert(window_size >= 3);
+	}
+
+	std::vector<T> filter(const std::vector<T> &in)
+	{
+		assert(in.size() > 0);
+		int hist_ptr = 0;
+
+		std::fill(history_.begin(), history_.end(), in[0]);
+		std::fill(pool_.begin(), pool_.end(), in[0]);
+
+		std::vector<T> out;
+		out.reserve(in.size());
+
+		for(auto x : in)
+		{
+			auto last = history_[hist_ptr];
+			auto last_pos = std::lower_bound(pool_.begin(), pool_.end(), last);
+			pool_.erase(last_pos);
+
+			auto insert_pos = std::lower_bound(pool_.begin(), pool_.end(), x);
+			pool_.insert(insert_pos, x);
+
+			history_[hist_ptr] = x;
+			hist_ptr = (hist_ptr + 1) % history_.size();
+
+			out.emplace_back(pool_[median_]);
+		}
+		return out;
+	}
+
+};
+
 int Ostu(std::vector<int> &input, float alpha)
 {
 	//calculate histogram
@@ -36,7 +86,7 @@ int Ostu(std::vector<int> &input, float alpha)
 	for(auto i : input)
 		hist[i]++;
 
-	float sumB = 0, varMax = 0, sum = 0;
+	float sumB = 0, varMax = 0, sum = 0, varB_max = 0, mB_max = 0, mF_max = 0;
 	int wB = 0, wF = 0, threshold = 0, total = input.size();
 
 	for(int t = 0; t < 256; t++) sum += t * hist[t];
@@ -61,13 +111,22 @@ int Ostu(std::vector<int> &input, float alpha)
 		for(int m = t+1; m < 256; m++)
 			varF += hist[m] * (static_cast<float>(m) - mF) * (static_cast<float>(m) - mF);
 
+		//calculate background class variance
+		float varB = 0;
+		for(int m = 0; m < t+1; m++)
+			varB += hist[m] * (static_cast<float>(m) - mB) * (static_cast<float>(m) - mB);
+		varB = varB / wB;
+
 		float loss = varBetween / (total * total) - alpha * varF / wF;
 
 		varMax = loss >= varMax ? loss : varMax;
 		threshold = loss >= varMax ? t : threshold;
+		varB_max = loss >= varMax ? varB : varB_max;
+		mB_max = loss >= varMax ? mB : mB_max;
+		mF_max = loss >= varMax ? mF : mF_max;
 	}
-	//in case all points belong to the same class
-	if(threshold == 0) threshold = 255;
+
+	if(std::abs(mF_max - mB_max) <= 3.5 * std::sqrt(varB_max)) threshold = 256;
 
 	return threshold;
 }
@@ -95,12 +154,14 @@ private:
 	std::shared_ptr<SensorMsg::PointCloud> final_lane;
 	std::vector<int> left_intensity, right_intensity;
 
+	LowerBoundVector<int> medianfilt = LowerBoundVector<int>(5);
+
 public:
 	int slideForGettingPoints(SensorMsg::PointCloud &points)
 	{
 		int w_0 = 10, w_d = 10, i = 0, points_num = points.point().size();
 
-		float xy_thresh = 0.1, z_thresh = 0.08;
+		float xy_thresh = 0.1, z_thresh = 0.04;
 
 		while((i + w_d) < points_num)
 		{
@@ -170,8 +231,8 @@ public:
 		final_lane->set_frame_id(pointcloud->frame_id());
 		final_lane->clear_point();
 
-		std::vector<SensorMsg::PointCloud> pc_left(FLAGS_scanline_max - FLAGS_scanline_min + 1 + 32);
-		std::vector<SensorMsg::PointCloud> pc_right(FLAGS_scanline_max - FLAGS_scanline_min + 1 + 32);
+		std::vector<SensorMsg::PointCloud> pc_left(32);
+		std::vector<SensorMsg::PointCloud> pc_right(32);
 
 		//pose_provider
 		if(PoseProvider::Instance()->GetState(pointcloud->timestamp(), pose) >= 0)
@@ -244,29 +305,18 @@ public:
 				// pt.set_z(baselink_pt(2));
 
 				//32 lidar
-				if(pt.id() == 1 && pt.x() > 0 && pt.y() >= 1 && pt.y() <= 10)
+				if(pt.id() == 2 && pt.x() > 3 && pt.y() > 0)
 				{
 					auto tmp = pc_left[pt.ring()].add_point();
 					*tmp = pt;
 				}
-				else if(pt.id() == 1 && pt.x() > 0 && pt.y() < -1 && pt.y() >= -10)
+				else if(pt.id() == 2 && pt.x() > 3 && pt.y() < 0)
 				{
 					auto tmp = pc_right[pt.ring()].add_point();
 					*tmp = pt;
 				}
-				//64 lidar
-				// if(pt.ring()<=FLAGS_scanline_max && pt.ring()>=FLAGS_scanline_min && pt.x()>0 && pt.y()>0 && pt.id()==0)
-				// {
-				// 	auto tmp = pc_left[pt.ring()-FLAGS_scanline_min + 32].add_point();
-				// 	*tmp = pt;
-				// }
-				// else if(pt.ring()<=FLAGS_scanline_max && pt.ring()>=FLAGS_scanline_min && pt.x()>0 && pt.y()<0 && pt.id()==0)
-				// {
-				// 	auto tmp = pc_right[pt.ring()-FLAGS_scanline_min + 32].add_point();
-				// 	*tmp = pt;
-				// }
 			}
-
+// std::ofstream out("ding.txt");
 			for(int i = 0; i < pc_left.size(); i++)
 			{
 				if(pc_left[i].point().size() != 0)
@@ -278,35 +328,39 @@ public:
 					left_intensity.clear();
 
 					for(int t = 0; t < leftindex; t++)
+					{
 						left_intensity.push_back(pc_left[i].point(t).intensity());
+						// out<<pc_left[i].point(t).intensity()<<std::endl;
+					}
 
+					left_intensity = medianfilt.filter(left_intensity);
 					int threshold = Ostu(left_intensity, FLAGS_alpha);
 
 					for(int t = 0; t < leftindex; t++)
 					{
-						if(pc_left[i].point(t).intensity() > std::max(threshold, FLAGS_minthred))
+						if(pc_left[i].point(t).intensity() > threshold)
 						{
-							// auto tmp = final_lane->add_point();
-							// *tmp = pc_left[i].point(t);
+							auto tmp = final_lane->add_point();
+							*tmp = pc_left[i].point(t);
 
-							// transform baselink coord to enu coord
-							if(pc_left[i].point(t).intensity() < FLAGS_min_intensity) continue;
+							//transform baselink coord to enu coord
+							// if(pc_left[i].point(t).intensity() < FLAGS_min_intensity) continue;
 
-							Eigen::Vector4d baselink_pt(4), enu_pt(4);
-							baselink_pt << pc_left[i].point(t).x(), pc_left[i].point(t).y(), pc_left[i].point(t).z(), 1;
-							enu_pt = transform_enu * baselink_pt;
-							auto q = map.add_points();
-							q->set_x(enu_pt(0));
-							q->set_y(enu_pt(1));
-							q->set_z(enu_pt(2));
-							q->set_intensity(std::min(static_cast<int>(pc_left[i].point(t).intensity()),
-													static_cast<int>(FLAGS_max_intensity)));
-							if(pc_left[i].point(t).intensity() > FLAGS_max_intensity)
-								q->set_label(COWA::SensorMsg::PointLabel::CRUB);
+							// Eigen::Vector4d baselink_pt(4), enu_pt(4);
+							// baselink_pt << pc_left[i].point(t).x(), pc_left[i].point(t).y(), pc_left[i].point(t).z(), 1;
+							// enu_pt = transform_enu * baselink_pt;
+							// auto q = map.add_points();
+							// q->set_x(enu_pt(0));
+							// q->set_y(enu_pt(1));
+							// q->set_z(enu_pt(2));
+							// q->set_intensity(std::min(static_cast<int>(pc_left[i].point(t).intensity()),
+							// 						static_cast<int>(FLAGS_max_intensity)));
+							// if(pc_left[i].point(t).intensity() > FLAGS_max_intensity)
+							// 	q->set_label(COWA::SensorMsg::PointLabel::CRUB);
 						}
 					}
 				}
-
+// out<<"mid"<<std::endl;
 				if(pc_right[i].point().size() != 0)
 				{
 					std::sort(pc_right[i].mutable_point()->begin(), pc_right[i].mutable_point()->end(),
@@ -316,40 +370,45 @@ public:
 					right_intensity.clear();
 
 					for(int t = 0; t < rightindex; t++)
+					{
 						right_intensity.push_back(pc_right[i].point(t).intensity());
+						// out<<pc_right[i].point(t).intensity()<<std::endl;
+					}
 
+					right_intensity = medianfilt.filter(right_intensity);
 					int threshold = Ostu(right_intensity, FLAGS_alpha);
 
 					for(int t = 0; t < rightindex; t++)
 					{
-						if(pc_right[i].point(t).intensity() > std::max(threshold, FLAGS_minthred))
+						if(pc_right[i].point(t).intensity() > threshold)
 						{
-							// auto tmp = final_lane->add_point();
-							// *tmp = pc_right[i].point(t);
+							auto tmp = final_lane->add_point();
+							*tmp = pc_right[i].point(t);
 
 							// transform baselink coord to enu coord
-							if(pc_right[i].point(t).intensity() < FLAGS_min_intensity) continue;
+							// if(pc_right[i].point(t).intensity() < FLAGS_min_intensity) continue;
 
-							Eigen::Vector4d baselink_pt(4), enu_pt(4);
-							baselink_pt << pc_right[i].point(t).x(), pc_right[i].point(t).y(), pc_right[i].point(t).z(), 1;
-							enu_pt = transform_enu * baselink_pt;
-							auto q = map.add_points();
-							q->set_x(enu_pt(0));
-							q->set_y(enu_pt(1));
-							q->set_z(enu_pt(2));
-							q->set_intensity(std::min(static_cast<int>(pc_right[i].point(t).intensity()),
-													static_cast<int>(FLAGS_max_intensity)));
-							if(pc_right[i].point(t).intensity() > FLAGS_max_intensity)
-								q->set_label(COWA::SensorMsg::PointLabel::CRUB);
+							// Eigen::Vector4d baselink_pt(4), enu_pt(4);
+							// baselink_pt << pc_right[i].point(t).x(), pc_right[i].point(t).y(), pc_right[i].point(t).z(), 1;
+							// enu_pt = transform_enu * baselink_pt;
+							// auto q = map.add_points();
+							// q->set_x(enu_pt(0));
+							// q->set_y(enu_pt(1));
+							// q->set_z(enu_pt(2));
+							// q->set_intensity(std::min(static_cast<int>(pc_right[i].point(t).intensity()),
+							// 						static_cast<int>(FLAGS_max_intensity)));
+							// if(pc_right[i].point(t).intensity() > FLAGS_max_intensity)
+							// 	q->set_label(COWA::SensorMsg::PointLabel::CRUB);
 						}
 					}
 				}
 			}
+// out.close();
 		}
 
 
-		// out_ptpub_->Write(final_lane);
-		COWA::SetProtoToBinaryFile(map, FLAGS_out);
+		out_ptpub_->Write(final_lane);
+		// COWA::SetProtoToBinaryFile(map, FLAGS_out);
 
 		return true;
 	}
