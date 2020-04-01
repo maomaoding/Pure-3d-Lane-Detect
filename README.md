@@ -6,4 +6,5 @@
 [Automatic Road Markings Extraction,Classifcation and Vectorization from Mobile Laser Scannig Data](https://www.int-arch-photogramm-remote-sens-spatial-inf-sci.net/XLII-2-W13/1089/2019/isprs-archives-XLII-2-W13-1089-2019.pdf)  
 [A new 3D LIDAR-based lane markings recognition approach](https://paperhub.ir/)(need ladder)  
 [Road-Segmentation based Curb Detection Method for Self-driving via a 3D-LiDAR Sensor](https://www.ri.cmu.edu/wp-content/uploads/2019/06/FINAL-VERSION-TITS2018.pdf)  
-[Image Thresholding by Variational Minimax Optimization](https://pdfs.semanticscholar.org/2c27/da4a850247edca74efac4a029ae461507bc4.pdf)
+[Image Thresholding by Variational Minimax Optimization](https://pdfs.semanticscholar.org/2c27/da4a850247edca74efac4a029ae461507bc4.pdf)  
+[100+ Times Faster Weighted Median Filter(WMF)](http://www.cse.cuhk.edu.hk/leojia/projects/fastwmedian/download/fastweightedmedian_cvpr14.pdf)
