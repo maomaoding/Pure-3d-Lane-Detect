@@ -57,8 +57,6 @@ T polyeval(std::vector<T> &coefficient, T x)
 }
 
 
-namespace COWA
-{
 SensorMsg::PointXYZIT slideForGettingPoints(std::vector<SensorMsg::PointXYZIT> &points)
 {
 	int w_0 = 10, w_d = 10, i = 0, points_num = points.size();
@@ -237,8 +235,8 @@ private:
 	util::ObjectPool<SensorMsg::PointCloud>::ObjectPoolPtr proto_pc_pool_;
 	std::shared_ptr<SensorMsg::PointCloud> curb;
 
-	std::shared_ptr<COWA::Writer<SensorMsg::Image> > img_pub_;
-	std::shared_ptr<COWA::Writer<SensorMsg::PointCloud> > pc_pub_;
+	std::shared_ptr<Writer<SensorMsg::Image> > img_pub_;
+	std::shared_ptr<Writer<SensorMsg::PointCloud> > pc_pub_;
 
 	std::vector<double> left_coeffi, right_coeffi;
 	std::vector<cv::Point2f> pts_rec;
@@ -255,7 +253,7 @@ public:
 	bool Init() override
 	{
 		//get param
-		auto param = std::make_shared<COWA::Parameter>(node_);
+		auto param = std::make_shared<Parameter>(node_);
 		auto tf = std::make_shared<math::Extrinsics>(param);
 		if(tf->lookupTransfrom("/base_link", FLAGS_frame_id_img, &transform_img) == false)
 			CRERROR << "tf fail camera" << "base link to :" << FLAGS_frame_id_img;
@@ -406,4 +404,3 @@ public:
 };
 
 NODE_REGISTER_COMPONENT(curbdetect);
-}

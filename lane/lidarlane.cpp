@@ -131,9 +131,6 @@ int Ostu(std::vector<int> &input, float alpha)
 	return threshold;
 }
 
-namespace COWA
-{
-
 class Lidarlane : public Component<SensorMsg::PointCloud>
 {
 private:
@@ -290,7 +287,7 @@ public:
 				map.set_offset_x(offset_x);
 				map.set_offset_y(offset_y);
 			}
-			auto func = [this](COWA::Transforms& pose){return COWA::Transforms(pose.translation()-ori, pose.rotation());};
+			auto func = [this](Transforms& pose){return Transforms(pose.translation()-ori, pose.rotation());};
 			transform_enu = func(pose).affine3d();
 			
 			//drivable region
@@ -356,7 +353,7 @@ public:
 							// q->set_intensity(std::min(static_cast<int>(pc_left[i].point(t).intensity()),
 							// 						static_cast<int>(FLAGS_max_intensity)));
 							// if(pc_left[i].point(t).intensity() > FLAGS_max_intensity)
-							// 	q->set_label(COWA::SensorMsg::PointLabel::CRUB);
+							// 	q->set_label(SensorMsg::PointLabel::CRUB);
 						}
 					}
 				}
@@ -398,7 +395,7 @@ public:
 							// q->set_intensity(std::min(static_cast<int>(pc_right[i].point(t).intensity()),
 							// 						static_cast<int>(FLAGS_max_intensity)));
 							// if(pc_right[i].point(t).intensity() > FLAGS_max_intensity)
-							// 	q->set_label(COWA::SensorMsg::PointLabel::CRUB);
+							// 	q->set_label(SensorMsg::PointLabel::CRUB);
 						}
 					}
 				}
@@ -408,10 +405,9 @@ public:
 
 
 		out_ptpub_->Write(final_lane);
-		// COWA::SetProtoToBinaryFile(map, FLAGS_out);
+		// SetProtoToBinaryFile(map, FLAGS_out);
 
 		return true;
 	}
 };
 NODE_REGISTER_COMPONENT(Lidarlane);
-}//namespace COWA

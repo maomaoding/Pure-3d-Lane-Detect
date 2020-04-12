@@ -20,8 +20,6 @@ DEFINE_double(LANE_QUALITY, 4, "qulity");
 DEFINE_double(CANNY_THRES1, 182, "canny threshold1 value");
 DEFINE_double(CANNY_THRES2, 182, "canny threshold2 value");
 
-namespace COWA
-{
 //         ======================  7
 // ||         |    |    |    |         ||
 // ||         |    |    |    |         ||
@@ -245,9 +243,9 @@ public:
 class LaneDetectInterface
 {
 private:
-	std::shared_ptr<COWA::Writer<SensorMsg::Image>> lane_det_pub_;
-	std::shared_ptr<COWA::Writer<lidar::Frame>> inner_points_pub_;
-	std::shared_ptr<COWA::Writer<SensorMsg::PointCloud>> lane_det_points_pub_;
+	std::shared_ptr<Writer<SensorMsg::Image>> lane_det_pub_;
+	std::shared_ptr<Writer<lidar::Frame>> inner_points_pub_;
+	std::shared_ptr<Writer<SensorMsg::PointCloud>> lane_det_points_pub_;
 	std::shared_ptr<LaneDetectBase> detect_;
 	util::ObjectPool<SensorMsg::Image>::ObjectPoolPtr proto_img_pool_;
 	util::ObjectPool<SensorMsg::PointCloud>::ObjectPoolPtr proto_pt_pool_;
@@ -256,11 +254,11 @@ private:
 	uint32_t seq_;
 	std::vector<cv::Point2f> pts;
 public:
-	bool Init(std::shared_ptr<COWA::Node> node_)
+	bool Init(std::shared_ptr<Node> node_)
 	{
 		seq_=1;
 		//get param
-		auto param = std::make_shared<COWA::Parameter>(node_);
+		auto param = std::make_shared<Parameter>(node_);
 		//std::string pub_name = param->value<std::string>("output");
 		std::string model_path = param->value<std::string>("model");
 		camera_type_ = param->value<std::string>("camera");
@@ -278,7 +276,7 @@ public:
 		proto_pt_pool_ = std::make_shared<util::ObjectPool<SensorMsg::PointCloud>>(48, init_pc);
 
 		//get cam param
-		COWA::math::Intrinsics x(param, camera_type_);
+		math::Intrinsics x(param, camera_type_);
 		detect_ = std::make_shared<LaneDetectBase>(model_path, x.intrinsics, x.distortion);
 
 		//writer init
@@ -358,4 +356,3 @@ public:
 	}
 };
 NODE_REGISTER_COMPONENT(LaneDetect);
-} // namespace COWA
